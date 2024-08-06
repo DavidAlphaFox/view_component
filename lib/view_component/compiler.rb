@@ -68,7 +68,7 @@ module ViewComponent
         end
       else
         templates.each do |template|
-          method_name = call_method_name(template[:variant])
+          method_name = call_method_name(template)
           @variants_rendering_templates << template[:variant]
 
           redefinition_lock.synchronize do
@@ -108,7 +108,7 @@ module ViewComponent
     def define_render_template_for
       variant_elsifs = variants.compact.uniq.map do |variant|
         safe_name = "_call_variant_#{normalized_variant_name(variant)}_#{safe_class_name}"
-        component_class.define_method(safe_name, component_class.instance_method(call_method_name(variant)))
+        component_class.define_method(safe_name, component_class.instance_method(call_method_name({ variant: variant })))
 
         "elsif variant.to_sym == :'#{variant}'\n    #{safe_name}"
       end.join("\n")
@@ -147,7 +147,9 @@ module ViewComponent
             errors << "Couldn't find a template file or inline render method for #{component_class}."
           end
 
-          if templates.count { |template| template[:variant].nil? } > 1
+          format_variant_combinations = templates.map { [_1[:format], _1[:variant]] }.tally
+
+          if format_variant_combinations.values.any? { _1 > 1 }
             errors <<
               "More than one template found for #{component_class}. " \
               "There can only be one default template file per component."
@@ -213,6 +215,7 @@ module ViewComponent
             pieces = File.basename(path).split(".")
             memo << {
               path: path,
+              format: pieces[-2],
               variant: pieces[1..-2].join(".").split("+").second&.to_sym,
               handler: pieces.last
             }
@@ -283,12 +286,18 @@ module ViewComponent
       # :nocov:
     end
 
-    def call_method_name(variant)
-      if variant.present? && variants.include?(variant)
-        "call_#{normalized_variant_name(variant)}"
-      else
-        "call"
+    def call_method_name(template)
+      output = "call"
+
+      if template[:variant].present? && variants.include?(template[:variant])
+        +output << "_#{normalized_variant_name(template[:variant])}"
       end
+
+      if template[:format].present? &&
+        +output << template[:format]
+      end
+
+      output
     end
 
     def normalized_variant_name(variant)
